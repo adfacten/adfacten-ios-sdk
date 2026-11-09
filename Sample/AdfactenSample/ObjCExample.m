@@ -19,7 +19,10 @@
 
 - (void)loadInterstitialFrom:(UIViewController *)viewController {
     [ADFInterstitialAd loadWithPlacementId:@"plc_XXXXXXXX" completion:^(ADFInterstitialAd *ad, NSError *error) {
-        if (error) { NSLog(@"no ad: %@ (code %ld)", error.localizedDescription, (long)error.code); return; }
+        if (error) {
+            NSLog(@"no ad: %@ (%@)", error.localizedDescription, error.userInfo[ADFAdfacten.errorNameKey]);
+            return;
+        }
         self.interstitial = ad;
         ad.delegate = self;
         if (ad.isReady) { [ad presentFromViewController:viewController]; }

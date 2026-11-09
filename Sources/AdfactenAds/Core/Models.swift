@@ -48,6 +48,8 @@ struct AdRequest: Encodable, Sendable, Equatable {
         var bundle: String
         var version: String
         var sdkVersion: String
+        /// Set only when a framework plugin (Flutter, React Native, …) reported itself.
+        var wrapper: WrapperInfo?
     }
 
     struct Regs: Encodable, Sendable, Equatable {
@@ -72,6 +74,28 @@ struct AdRequest: Encodable, Sendable, Equatable {
         enc.keyEncodingStrategy = .convertToSnakeCase
         return enc
     }
+}
+
+/// The cross-platform framework the SDK runs under, reported by its plugin.
+struct WrapperInfo: Encodable, Sendable, Equatable {
+    static let knownNames: Set<String> = ["flutter", "react_native", "unity", "other"]
+
+    var name: String
+    var version: String
+
+    /// Unknown names become `other`; the version keeps only `[0-9A-Za-z.+-]`, at most 20 chars.
+    init(name: String, version: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.name = Self.knownNames.contains(n) ? n : "other"
+        let allowed = version.unicodeScalars.filter {
+            $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "+-.".unicodeScalars.contains($0))
+        }
+        let v = String(String.UnicodeScalarView(allowed).prefix(20))
+        self.version = v.isEmpty ? "unknown" : v
+    }
+
+    /// ` Wrapper/<name>-<version>`, appended to the User-Agent.
+    var userAgentSuffix: String { " Wrapper/\(name)-\(version)" }
 }
 
 // MARK: - Response

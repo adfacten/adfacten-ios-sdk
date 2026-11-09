@@ -5,7 +5,7 @@ enum AdRequestBuilder {
     static func build(appKey: String, placement: String, format: AdFormat, sizes: [String],
                       device: DeviceSnapshot, identity: ResolvedIdentity, sdkId: String,
                       consent: ConsentSnapshot, config: ConfigSnapshot,
-                      userId: String?, custom: String?) -> AdRequest {
+                      userId: String?, custom: String?, wrapper: WrapperInfo? = nil) -> AdRequest {
         var user: AdRequest.User?
         // The publisher user id/custom string only matter for rewarded SSV; never send them otherwise.
         if format == .rewarded, (userId?.isEmpty == false) || (custom?.isEmpty == false) {
@@ -31,7 +31,8 @@ enum AdRequestBuilder {
                 connection: device.connection,
                 tzOffsetMin: device.tzOffsetMin
             ),
-            app: .init(bundle: device.bundleId, version: device.appVersion, sdkVersion: Adfacten.sdkVersion),
+            app: .init(bundle: device.bundleId, version: device.appVersion, sdkVersion: Adfacten.sdkVersion,
+                       wrapper: wrapper),
             regs: .init(coppa: config.childDirected, gdpr: consent.gdprApplies, tcf: consent.tcString,
                         gpp: consent.gppString, usPrivacy: consent.usPrivacy),
             user: user,
@@ -67,7 +68,7 @@ final class AdClient: Sendable {
         do {
             req.httpBody = try AdRequest.encoder().encode(body)
         } catch {
-            return .failure(AdfactenError(.invalidResponse, "could not encode the ad request"))
+            return .failure(AdfactenError(.invalidResponse, "could not encode the ad request", name: .internalError))
         }
 
         let data: Data
@@ -104,7 +105,7 @@ final class AdClient: Sendable {
             }
             return .failure(AdfactenError(.serverRejected, message, serverCode: code))
         default:
-            return .failure(AdfactenError(.network, "server error (HTTP \(status))"))
+            return .failure(AdfactenError(.network, "server error (HTTP \(status))", name: .serverError))
         }
     }
 }

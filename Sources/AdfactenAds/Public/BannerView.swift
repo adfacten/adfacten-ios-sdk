@@ -39,7 +39,9 @@ public protocol AdfactenBannerViewDelegate: AnyObject {
 
 /// A banner ad view. Add it to your layout (it has an intrinsic content size) and call `load()`.
 /// It refreshes itself every `refreshInterval` seconds of on-screen time, only while visible and
-/// while the app is active.
+/// while the app is active. After a failed load (no fill, network or server error) it tries again
+/// on the same timer; a rejected request (app or placement not approved, COPPA) stops it until the
+/// next `load()`.
 @objc(ADFBannerView)
 @MainActor
 public final class AdfactenBannerView: UIView {
@@ -51,14 +53,22 @@ public final class AdfactenBannerView: UIView {
     /// The controller used to present the App Store sheet on click. Defaults to the owning controller.
     @objc public weak var rootViewController: UIViewController?
     /// Seconds of visible time between refreshes; clamped to 30…120. 0 disables refresh.
-    /// A refresh interval set on the placement (server) takes precedence.
-    @objc public var refreshInterval: TimeInterval = 60
+    /// If you set it, it wins over the placement's setting from the server. If you don't, the
+    /// placement's setting is used (60 s when it has none).
+    @objc public var refreshInterval: TimeInterval {
+        get { appRefresh ?? 60 }
+        set { appRefresh = newValue }
+    }
 
     public var onLoaded: (() -> Void)?
     public var onFailed: ((Error) -> Void)?
     public var onClicked: (() -> Void)?
     public var onImpression: (() -> Void)?
 
+    /// The interval the app set, if any.
+    private var appRefresh: TimeInterval?
+    /// `refresh_s` of the last ad the server sent (nil: not sent).
+    private var serverRefresh: TimeInterval?
     private var current: LoadedAd?
     private var creative: CreativeView?
     private var tracker: ViewabilityTracker?
@@ -66,7 +76,7 @@ public final class AdfactenBannerView: UIView {
     private var loading = false
     private var wantsAd = false
     private var visibleSinceLoad: TimeInterval = 0
-    private var retryAfterFailure: TimeInterval?
+    private(set) var retryAfterFailure: TimeInterval?
     private var poll: Timer?
 
     @objc public init(placementId: String, size: AdfactenBannerSize) {
@@ -150,14 +160,24 @@ public final class AdfactenBannerView: UIView {
             case .failure(let err) where err.code == .serverRejected || err.code == .childDirected:
                 // Configuration errors: a retry won't fix them, so stop until the next load().
                 self.wantsAd = false
+                self.retryAfterFailure = nil
                 self.report(err)
             case .failure(let err):
-                // Keep the current creative (if any) and try again later.
-                self.retryAfterFailure = self.effectiveRefresh > 0 ? self.effectiveRefresh : 60
-                self.visibleSinceLoad = 0
+                // Keep the current creative (if any) and try again later, but never before the
+                // placement's backoff ends (a request then would fail without reaching the server).
+                let wait = await ctx.backoff.remaining(placement) ?? 0
+                self.scheduleRetry(minimum: wait)
                 self.report(err)
             }
         }
+    }
+
+    /// Next attempt after a failure: one refresh interval of on-screen time (60 s when refresh is
+    /// off), or longer while the placement backs off.
+    private func scheduleRetry(minimum: TimeInterval = 0) {
+        let interval = effectiveRefresh > 0 ? effectiveRefresh : 60
+        retryAfterFailure = max(interval, minimum)
+        visibleSinceLoad = 0
     }
 
     private func show(_ ad: LoadedAd, context ctx: SDKContext) {
@@ -183,6 +203,7 @@ public final class AdfactenBannerView: UIView {
         badge = b
         creative = view
         current = ad
+        serverRefresh = ad.payload.refreshS
         visibleSinceLoad = 0
 
         let t = ViewabilityTracker(view: view, rule: ad.viewRule, isActive: ctx.env.appIsActive)
@@ -202,7 +223,12 @@ public final class AdfactenBannerView: UIView {
             self.delegate?.bannerViewDidLoad?(self)
             self.onLoaded?()
         }
-        view.onFailure = { [weak self] err in self?.report(err) }
+        view.onFailure = { [weak self] err in
+            guard let self, self.current?.payload.id == ad.payload.id else { return }
+            // The creative never rendered, so the refresh timer would not run; retry instead.
+            if self.tracker?.hasRendered != true { self.scheduleRetry() }
+            self.report(err)
+        }
         view.onTap = { [weak self] url in self?.clicked(ad, linkURL: url, context: ctx) }
         if window != nil { t.start() }
         view.startLoading()
@@ -224,10 +250,14 @@ public final class AdfactenBannerView: UIView {
 
     // MARK: Refresh
 
+    /// The app's setting wins, then the placement's `refresh_s` (0 = off), then 60 s.
     var effectiveRefresh: TimeInterval {
-        let server = current?.payload.refreshS ?? 0
-        let base = server > 0 ? server : refreshInterval
-        guard base > 0 else { return 0 }
+        Self.refreshInterval(app: appRefresh, server: serverRefresh)
+    }
+
+    nonisolated static func refreshInterval(app: TimeInterval?, server: TimeInterval?) -> TimeInterval {
+        let base = app ?? server ?? 60
+        guard base > 0, base.isFinite else { return 0 }
         return min(max(base, 30), 120)
     }
 
@@ -240,19 +270,21 @@ public final class AdfactenBannerView: UIView {
         poll = t
     }
 
-    private func refreshTick() {
+    func refreshTick() {
         guard wantsAd, !loading, window != nil else { return }
         guard let ctx = Adfacten.context, ctx.env.appIsActive() else { return }
+        // Nothing is requested while the banner is off screen (scrolled away, hidden, covered).
         let onScreen = Visibility.measure(self) > 0
-        if current == nil || retryAfterFailure != nil {
-            // Waiting to retry after a failure: count on-screen time only.
-            if onScreen && tracker == nil { visibleSinceLoad += 1 }
-            if visibleSinceLoad >= (retryAfterFailure ?? 60) { fetch() }
+        if let retry = retryAfterFailure ?? (current == nil ? 60 : nil) {
+            // Waiting to retry after a failure: count on-screen time only. A rendered creative's
+            // tracker already counts it.
+            if onScreen && tracker?.hasRendered != true { visibleSinceLoad += 1 }
+            if onScreen, visibleSinceLoad >= retry { fetch() }
             return
         }
         // Refresh only after the current creative has rendered and was on screen long enough.
         let interval = effectiveRefresh
-        if interval > 0, tracker?.hasRendered == true, visibleSinceLoad >= interval {
+        if interval > 0, onScreen, tracker?.hasRendered == true, visibleSinceLoad >= interval {
             fetch()
         }
     }

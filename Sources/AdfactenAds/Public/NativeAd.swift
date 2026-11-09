@@ -37,6 +37,11 @@ public final class NativeAd: NSObject {
 
     let loaded: LoadedAd
     let context: SDKContext
+    /// The view showing this ad. An ad lives in one view at a time.
+    weak var boundView: NativeAdView?
+    /// Impression state is kept on the ad, not the view, so re-binding never counts twice.
+    var impressionRecorded = false
+    var viewableRecorded = false
 
     init(loaded: LoadedAd, context: SDKContext, image: UIImage?, icon: UIImage?) {
         self.placementId = loaded.placementId
@@ -74,6 +79,8 @@ public final class NativeAd: NSObject {
 /// Container for a native ad. Connect the outlets (in code or Interface Builder), then set `nativeAd`.
 /// The view fills the outlets, adds an "Ad" badge if you have no `adLabel`, and records the
 /// impression, the viewable impression and clicks (taps anywhere on the view or the CTA).
+/// An ad is shown in one view at a time: binding it to another view detaches it from the first.
+/// Each ad records one impression, however often it is bound.
 @objc(ADFNativeAdView)
 @MainActor
 open class NativeAdView: UIView {
@@ -93,7 +100,7 @@ open class NativeAdView: UIView {
     @objc open var nativeAd: NativeAd? {
         didSet {
             guard oldValue !== nativeAd else { return }
-            unbind()
+            unbind(oldValue)
             if let nativeAd { bind(nativeAd) }
         }
     }
@@ -104,6 +111,8 @@ open class NativeAdView: UIView {
     }
 
     private func bind(_ ad: NativeAd) {
+        if let previous = ad.boundView, previous !== self { previous.detach() }
+        ad.boundView = self
         titleLabel?.text = ad.title
         bodyLabel?.text = ad.body
         brandLabel?.text = ad.brand
@@ -136,17 +145,36 @@ open class NativeAdView: UIView {
         let t = ViewabilityTracker(view: self, rule: loaded.viewRule, isActive: ctx.env.appIsActive)
         t.contentReady = true
         t.onRender = { [weak ad] in
+            guard let ad, !ad.impressionRecorded else { return }
+            ad.impressionRecorded = true
             ctx.fire(.render, for: loaded)
-            guard let ad else { return }
             ad.delegate?.nativeAdDidRecordImpression?(ad)
             ad.onImpression?()
         }
-        t.onViewable = { ctx.fire(.view, for: loaded) }
+        t.onViewable = { [weak ad] in
+            guard let ad, !ad.viewableRecorded else { return }
+            ad.viewableRecorded = true
+            ctx.fire(.view, for: loaded)
+        }
         tracker = t
         if window != nil { t.start() }
     }
 
-    private func unbind() {
+    /// The ad moved to another view: stop tracking here and clear what `bind` filled in, so this
+    /// view doesn't keep showing an ad it no longer counts.
+    private func detach() {
+        nativeAd = nil
+        titleLabel?.text = nil
+        bodyLabel?.text = nil
+        brandLabel?.text = nil
+        callToActionButton?.setTitle(nil, for: .normal)
+        mediaView?.image = nil
+        iconView?.image = nil
+        adLabel?.text = nil
+    }
+
+    private func unbind(_ ad: NativeAd?) {
+        if let ad, ad.boundView === self { ad.boundView = nil }
         tracker?.stop()
         tracker = nil
         autoBadge?.removeFromSuperview()

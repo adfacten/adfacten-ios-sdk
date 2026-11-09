@@ -121,7 +121,9 @@ final class BackoffTests: XCTestCase {
         XCTAssertEqual(PlacementBackoff.delay(failures: 1, jitter: 0), 30)
         XCTAssertEqual(PlacementBackoff.delay(failures: 2, jitter: 0), 60)
         XCTAssertEqual(PlacementBackoff.delay(failures: 4, jitter: 0), 240)
-        XCTAssertEqual(PlacementBackoff.delay(failures: 9, jitter: 0), 300)
+        XCTAssertEqual(PlacementBackoff.delay(failures: 5, jitter: 0), 480)
+        XCTAssertEqual(PlacementBackoff.delay(failures: 6, jitter: 0), 900, "capped at 15 min")
+        XCTAssertEqual(PlacementBackoff.delay(failures: 99, jitter: 1), 1125)
         XCTAssertEqual(PlacementBackoff.delay(failures: 1, jitter: 1), 37.5)
         XCTAssertGreaterThanOrEqual(PlacementBackoff.delay(failures: 0, jitter: 0), 30, "never below the 30 s minimum")
     }

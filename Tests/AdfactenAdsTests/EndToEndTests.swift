@@ -223,6 +223,184 @@ final class EndToEndTests: XCTestCase {
         await waitUntil(5, "view beacon") { !self.beacons("view").isEmpty }
         v.nativeAd = nil
     }
+
+    // MARK: 1.0.2
+
+    func testNativeRebindMovesTheAdAndCountsOnce() async throws {
+        MockURLProtocol.route("/m/v1/ad", .init(status: 200, body: Fixtures.adJSON(format: "native", kind: "native", id: "imp-rb")))
+        let ad = try await NativeAd.load(placementId: "plc_nat")
+        var impressions = 0
+        ad.onImpression = { impressions += 1 }
+        func makeView(y: CGFloat) -> (NativeAdView, UILabel) {
+            let v = NativeAdView(frame: CGRect(x: 0, y: y, width: 360, height: 120))
+            let title = UILabel()
+            v.addSubview(title)
+            v.titleLabel = title
+            window.rootViewController!.view.addSubview(v)
+            return (v, title)
+        }
+        let (v1, title1) = makeView(y: 100)
+        let (v2, title2) = makeView(y: 300)
+
+        v1.nativeAd = ad
+        await waitUntil(5, "impression") { impressions == 1 }
+        await waitUntil(5, "view beacon") { !self.beacons("view").isEmpty }
+
+        v2.nativeAd = ad
+        XCTAssertNil(v1.nativeAd, "binding to a new view detaches the old one")
+        XCTAssertNil(title1.text)
+        XCTAssertEqual(title2.text, "Başlık")
+        XCTAssertFalse(v1.subviews.contains { ($0 as? UILabel)?.text?.contains("Reklam") == true }, "old badge removed")
+
+        // Bind back and forth, then give the trackers time to tick.
+        v1.nativeAd = ad
+        v1.nativeAd = nil
+        v1.nativeAd = ad
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertNil(v2.nativeAd)
+        XCTAssertEqual(impressions, 1)
+        XCTAssertEqual(beacons("render").count, 1)
+        XCTAssertEqual(beacons("view").count, 1)
+        v1.nativeAd = nil
+    }
+
+    func testWrapperIsReportedOnTheWire() async throws {
+        Adfacten.setWrapper(name: "flutter", version: "1.0.1")
+        defer { Adfacten.wrapperBox.set(nil) }
+        Adfacten.initialize(appKey: "apk_test", config: AdfactenConfig(testMode: true))
+        MockURLProtocol.route("/m/v1/ad", .init(status: 200, body: Fixtures.adJSON(format: "interstitial")))
+        _ = try await InterstitialAd.load(placementId: "plc_w")
+        let req = try XCTUnwrap(MockURLProtocol.requests(path: "/m/v1/ad").last)
+        XCTAssertTrue(req.headers["User-Agent"]?.hasSuffix(" Wrapper/flutter-1.0.1") == true, req.headers["User-Agent"] ?? "")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: req.body ?? Data()) as? [String: Any])
+        let app = try XCTUnwrap(body["app"] as? [String: Any])
+        XCTAssertEqual(app["wrapper"] as? [String: String], ["name": "flutter", "version": "1.0.1"])
+        XCTAssertEqual(app["sdk_version"] as? String, "1.0.2")
+    }
+
+    func testOfflineIsNotPenalisedButServerErrorsAre() async {
+        MockURLProtocol.route("/m/v1/ad", .init(status: 0, fail: true))
+        for _ in 0..<2 {
+            do { _ = try await InterstitialAd.load(placementId: "plc_off"); XCTFail("expected error") } catch {
+                XCTAssertEqual((error as? AdfactenError)?.name, "network_error")
+            }
+        }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 2, "offline must not start a backoff")
+
+        MockURLProtocol.route("/m/v1/ad", .init(status: 503))
+        var names: [String] = []
+        for _ in 0..<2 {
+            do { _ = try await InterstitialAd.load(placementId: "plc_5xx"); XCTFail("expected error") } catch {
+                names.append((error as? AdfactenError)?.name ?? "?")
+            }
+        }
+        XCTAssertEqual(names, ["server_error", "no_fill"], "the second load fails fast while backing off")
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").filter { $0.body.map { String(decoding: $0, as: UTF8.self).contains("plc_5xx") } == true }.count,
+                       1, "a 5xx backs the placement off")
+    }
+
+    private func onScreenBanner(_ placement: String) -> AdfactenBannerView {
+        let banner = AdfactenBannerView(placementId: placement, size: .banner)
+        banner.frame.origin = CGPoint(x: 10, y: 100)
+        window.rootViewController!.view.addSubview(banner)
+        return banner
+    }
+
+    func testBannerRetriesAfterNoFillOnItsTimer() async {
+        MockURLProtocol.route("/m/v1/ad", .init(status: 204))
+        let banner = onScreenBanner("plc_retry")
+        var failures: [String] = []
+        var loaded = 0
+        banner.onFailed = { failures.append(($0 as? AdfactenError)?.name ?? "?") }
+        banner.onLoaded = { loaded += 1 }
+        banner.load()
+        await waitUntil(5, "first failure") { failures.count == 1 }
+        XCTAssertEqual(failures, ["no_fill"])
+        XCTAssertEqual(banner.retryAfterFailure, 60, "refresh interval (60 s) is longer than the 30 s backoff")
+
+        clock.advance(31)
+        for _ in 0..<45 { banner.refreshTick() }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 1, "no retry before the interval")
+
+        // Off screen: time doesn't count and nothing is requested.
+        banner.isHidden = true
+        for _ in 0..<100 { banner.refreshTick() }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 1, "never retry while hidden")
+        banner.isHidden = false
+
+        MockURLProtocol.route("/m/v1/ad", .init(status: 200, body: Fixtures.adJSON(format: "banner", kind: "image", id: "imp-r")))
+        for _ in 0..<20 { banner.refreshTick() }
+        await waitUntil(5, "retry fills") { loaded == 1 }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 2)
+        XCTAssertNil(banner.retryAfterFailure)
+        banner.destroy()
+        banner.removeFromSuperview()
+    }
+
+    func testBannerRetryWaitsForTheBackoff() async {
+        MockURLProtocol.route("/m/v1/ad", .init(status: 204))
+        let banner = onScreenBanner("plc_bo")
+        banner.refreshInterval = 30
+        var failures = 0
+        banner.onFailed = { _ in failures += 1 }
+        banner.load()
+        await waitUntil(5, "first failure") { failures == 1 }
+        XCTAssertEqual(banner.retryAfterFailure, 30)
+        clock.advance(31)
+        for _ in 0..<30 { banner.refreshTick() }
+        await waitUntil(5, "second failure") { failures == 2 }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 2)
+        // Second no-fill: the placement backs off 60 s, so the banner waits that long, not 30 s.
+        XCTAssertEqual(banner.retryAfterFailure ?? 0, 60, accuracy: 0.5)
+        banner.destroy()
+        banner.removeFromSuperview()
+    }
+
+    func testBannerStopsAfterRejectionUntilLoad() async {
+        MockURLProtocol.route("/m/v1/ad", .init(status: 403, body: Data(#"{"code":"app_not_approved","message":"no"}"#.utf8)))
+        let banner = onScreenBanner("plc_rej")
+        var failures: [String] = []
+        banner.onFailed = { failures.append(($0 as? AdfactenError)?.name ?? "?") }
+        banner.load()
+        await waitUntil(5, "rejection") { failures.count == 1 }
+        XCTAssertEqual(failures, ["rejected"])
+        XCTAssertNil(banner.retryAfterFailure)
+        clock.advance(3600)
+        for _ in 0..<200 { banner.refreshTick() }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 1, "4xx stops retrying")
+
+        banner.load()
+        await waitUntil(5, "explicit load retries") { failures.count == 2 }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 2)
+        banner.destroy()
+        banner.removeFromSuperview()
+    }
+
+    func testAppRefreshOffBeatsServerRefresh() async {
+        MockURLProtocol.route("/m/v1/ad", .init(status: 200, body: Fixtures.adJSON(format: "banner", kind: "image", id: "imp-off",
+                                                                                     extra: #","refresh_s":30"#)))
+        let banner = onScreenBanner("plc_off_r")
+        banner.refreshInterval = 0
+        var impressions = 0
+        banner.onImpression = { impressions += 1 }
+        banner.load()
+        await waitUntil(5, "render") { impressions == 1 }
+        XCTAssertEqual(banner.effectiveRefresh, 0)
+        for _ in 0..<200 { banner.refreshTick() }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 1, "no refresh when the app turned it off")
+        banner.destroy()
+        banner.removeFromSuperview()
+
+        // Without an app setting the server's value is used.
+        let other = onScreenBanner("plc_srv_r")
+        var shown = 0
+        other.onImpression = { shown += 1 }
+        other.load()
+        await waitUntil(5, "render") { shown == 1 }
+        XCTAssertEqual(other.effectiveRefresh, 30)
+        other.destroy()
+        other.removeFromSuperview()
+    }
 }
 
 @MainActor

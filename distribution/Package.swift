@@ -13,8 +13,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "AdfactenAds",
-            url: "https://cdn.adfacten.com/ios/AdfactenAds-1.0.0.xcframework.zip",
-            checksum: "6ab9883dc8d92597f2f0c7391c4b2434c15950548e7e465e16367539290b883f"
+            url: "https://cdn.adfacten.com/ios/AdfactenAds-1.0.2.xcframework.zip",
+            checksum: "1bd65a2b8f69ca1cab4c6058bb16783ce7017cb2b38f73917919e5e323a95921"
         ),
     ]
 )

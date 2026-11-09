@@ -1,6 +1,6 @@
 import Foundation
 
-/// Per-placement backoff after a no-fill or a failed request (at least 30 s, with jitter).
+/// Per-placement backoff after a no-fill or a server error (30 s up to 15 min, with jitter).
 /// While a placement backs off, loads fail fast with `.noFill` and nothing goes on the network.
 actor PlacementBackoff {
     private var failures: [String: Int] = [:]
@@ -13,10 +13,10 @@ actor PlacementBackoff {
         self.jitter = jitter
     }
 
-    /// 30 s, 60 s, 120 s, 240 s, then 300 s; each +0–25 % jitter so devices don't sync up.
+    /// 30 s, 60 s, 120 s … doubling up to 15 min; each +0–25 % jitter so devices don't sync up.
     static func delay(failures: Int, jitter: Double) -> TimeInterval {
-        let n = max(1, failures)
-        let base = min(30 * pow(2, Double(n - 1)), 300)
+        let n = min(max(1, failures), 16)
+        let base = min(30 * pow(2, Double(n - 1)), 900)
         return base * (1 + 0.25 * min(max(jitter, 0), 1))
     }
 

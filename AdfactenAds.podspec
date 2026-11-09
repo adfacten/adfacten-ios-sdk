@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = "AdfactenAds"
-  s.version          = "1.0.0"
+  s.version          = "1.0.2"
   s.summary          = "Adfacten Ads SDK for iOS: banner, interstitial, rewarded, native and app-open ads."
   s.homepage         = "https://github.com/adfacten/adfacten-ios-sdk"
   s.license          = { :type => "Apache-2.0", :file => "LICENSE" }

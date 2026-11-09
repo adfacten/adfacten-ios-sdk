@@ -42,7 +42,22 @@ struct ConfigSnapshot: Sendable, Equatable {
 @objc(ADFAdfacten)
 public final class Adfacten: NSObject {
     /// SDK version (semantic).
-    @objc public static let sdkVersion = "1.0.0"
+    @objc public static let sdkVersion = "1.0.2"
+
+    /// `NSError.userInfo` key of the stable error name (`no_fill`, `rejected`, …).
+    @objc public static let errorNameKey = AdfactenErrorNameKey
+
+    static let wrapperBox = Locked<WrapperInfo?>(nil)
+    static var wrapper: WrapperInfo? { wrapperBox.get() }
+
+    /// For framework plugins (Flutter, React Native, Unity) only; apps don't need it.
+    /// Reports the plugin with each ad request (`app.wrapper`) and in the User-Agent. Call it
+    /// before `initialize`. Names other than `flutter`, `react_native` and `unity` are sent as
+    /// `other`; the version keeps `[0-9A-Za-z.+-]`, up to 20 characters.
+    @objc(setWrapperName:version:)
+    public static func setWrapper(name: String, version: String) {
+        wrapperBox.set(WrapperInfo(name: name, version: version))
+    }
 
     @MainActor static var context: SDKContext?
     @MainActor static var environment = SDKEnvironment.live
@@ -149,7 +164,8 @@ final class SDKContext: @unchecked Sendable {
         let sessionConfig = env.sessionConfiguration()
         // Beacons and VAST trackers carry the SDK user agent too, so the server never sees a bare
         // CFNetwork UA (which bot filters may drop).
-        let ua = UserAgent.make(sdkVersion: Adfacten.sdkVersion, device: DeviceSnapshot.capture(connection: "unknown"))
+        let ua = UserAgent.make(sdkVersion: Adfacten.sdkVersion, device: DeviceSnapshot.capture(connection: "unknown"),
+                                wrapper: Adfacten.wrapper)
         var headers = sessionConfig.httpAdditionalHeaders ?? [:]
         headers["User-Agent"] = ua
         headers["X-Adfacten-SDK"] = "ios/\(Adfacten.sdkVersion)"
@@ -205,16 +221,18 @@ final class SDKContext: @unchecked Sendable {
         )
         let body = AdRequestBuilder.build(appKey: appKey, placement: placement, format: format, sizes: sizes,
                                           device: device, identity: identity, sdkId: sdkId, consent: consent,
-                                          config: config, userId: userId, custom: custom)
-        let ua = UserAgent.make(sdkVersion: Adfacten.sdkVersion, device: device)
+                                          config: config, userId: userId, custom: custom, wrapper: Adfacten.wrapper)
+        let ua = UserAgent.make(sdkVersion: Adfacten.sdkVersion, device: device, wrapper: Adfacten.wrapper)
         Log.debug("requesting \(format.rawValue) for \(placement)")
 
         let fetched = await client.fetch(body, userAgent: ua)
         switch fetched {
         case .failure(let err):
-            // Back off after no-fill, 5xx and network errors. 400/403 are configuration errors
-            // that a retry won't fix.
-            if err.code == .noFill || err.code == .network { await backoff.recordFailure(placement) }
+            // Back off after no-fill and 5xx. Being offline is not the placement's fault, and
+            // 400/403 are configuration errors that a retry won't fix.
+            if err.name == AdfactenErrorName.noFill.rawValue || err.name == AdfactenErrorName.serverError.rawValue {
+                await backoff.recordFailure(placement)
+            }
             Log.info("load failed for \(placement): \(err.message)")
             return .failure(err)
         case .success(let f):

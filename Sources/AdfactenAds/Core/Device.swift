@@ -55,9 +55,11 @@ struct DeviceSnapshot: Sendable, Equatable {
 
 enum UserAgent {
     /// `AdfactenSDK/<sdk_version> (ios <osv>; <model>) <bundle>/<app_version>`
-    static func make(sdkVersion: String, device: DeviceSnapshot) -> String {
+    /// A wrapper (Flutter, React Native, …) adds ` Wrapper/<name>-<version>`.
+    static func make(sdkVersion: String, device: DeviceSnapshot, wrapper: WrapperInfo? = nil) -> String {
         "AdfactenSDK/\(sdkVersion) (ios \(device.osVersion); \(sanitize(device.model))) "
             + "\(sanitize(device.bundleId))/\(sanitize(device.appVersion))"
+            + (wrapper?.userAgentSuffix ?? "")
     }
 
     private static func sanitize(_ s: String) -> String {

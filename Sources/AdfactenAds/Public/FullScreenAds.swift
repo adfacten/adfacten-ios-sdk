@@ -18,6 +18,7 @@ public protocol FullScreenAdDelegate: AnyObject {
 @objc(ADFReward)
 public final class AdReward: NSObject, Sendable {
     @objc public let type: String
+    /// The amount set on the placement, exactly as the server sent it (always a whole number).
     @objc public let amount: Double
 
     init(type: String, amount: Double) {
@@ -124,7 +125,7 @@ public class FullScreenAd: NSObject {
     }
 
     private func presentationError(_ vc: UIViewController) -> AdfactenError? {
-        if used { return AdfactenError(.notReady, "this ad was already shown; load a new one") }
+        if used { return AdfactenError(.notReady, "this ad was already shown; load a new one", name: .alreadyShown) }
         if loaded.isExpired(now: context.env.clock.now()) {
             return AdfactenError(.expired, "the ad expired; load a new one")
         }

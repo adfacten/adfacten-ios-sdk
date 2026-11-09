@@ -13,7 +13,7 @@ Banner, interstitial, rewarded, native and app-open ads from the Adfacten networ
 In Xcode: **File > Add Package Dependencies…** and enter `https://github.com/adfacten/adfacten-ios-sdk`, or in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/adfacten/adfacten-ios-sdk.git", from: "1.0.0")
+.package(url: "https://github.com/adfacten/adfacten-ios-sdk.git", from: "1.0.2")
 ```
 
 and add `"AdfactenAds"` to your target's dependencies.
@@ -21,12 +21,12 @@ and add `"AdfactenAds"` to your target's dependencies.
 ### CocoaPods
 
 ```ruby
-pod 'AdfactenAds', :git => 'https://github.com/adfacten/adfacten-ios-sdk.git', :tag => '1.0.0'
+pod 'AdfactenAds', :git => 'https://github.com/adfacten/adfacten-ios-sdk.git', :tag => '1.0.2'
 ```
 
 ### Manual
 
-1. Download `https://cdn.adfacten.com/ios/AdfactenAds-1.0.0.xcframework.zip` and unzip it.
+1. Download `https://cdn.adfacten.com/ios/AdfactenAds-1.0.2.xcframework.zip` and unzip it.
 2. Drag `AdfactenAds.xcframework` into your project and set it to **Embed & Sign**.
 
 ## Initialize
@@ -67,7 +67,12 @@ All callbacks run on the main thread. Each loaded ad expires about 55 minutes af
 
 Sizes: `.banner` 320×50, `.largeBanner` 320×100, `.mediumRectangle` 300×250, `.leaderboard` 728×90 (tablets).
 
-The banner refreshes every 30–120 seconds (placement setting, or `refreshInterval`). Time only counts while the banner is on screen and the app is active.
+The banner refreshes every 30–120 seconds of on-screen time. Time only counts while the banner is on screen and the app is active.
+
+- If you set `refreshInterval`, it wins: `0` turns refresh off, even when the placement has an interval in the panel.
+- If you don't set it, the placement's interval from the panel is used (off if the placement says 0), otherwise 60 seconds.
+- After a failed load (no fill, network or server error) the banner tries again by itself after one refresh interval of on-screen time (60 seconds when refresh is off), and never before the placement's backoff ends. It doesn't retry while it is off screen or the app is in the background.
+- A rejected request (`rejected`, `invalid_request`, `child_directed`: app or placement not approved, wrong bundle, COPPA) stops the banner until you call `load()` again.
 
 ```swift
 let banner = AdfactenBannerView(placementId: "plc_XXXXXXXX", size: .banner)
@@ -180,6 +185,8 @@ NativeAd.load(placementId: "plc_XXXXXXXX") { ad, error in
 
 The view records impressions and clicks itself; taps anywhere on it open the ad. Keep the ad label visible; if `adLabel` is not connected, the view adds a small badge. Set `nativeAd = nil` when a cell is reused.
 
+An ad is shown in one view at a time. Setting the same ad on another view moves it there: the first view stops tracking and its outlets are cleared. Each ad records one impression, however often it is bound.
+
 ## App open
 
 ```swift
@@ -191,7 +198,13 @@ appOpen?.present()   // or present(from: viewController)
 
 ## Errors
 
-Errors use the domain `com.adfacten.ads` and `AdfactenErrorCode`:
+Errors use the domain `com.adfacten.ads` and `AdfactenErrorCode`. Each error also has a stable `name`, the same on iOS and Android (`AdfactenError.name` in Swift, `error.userInfo[ADFAdfacten.errorNameKey]` (`"AdfactenErrorName"`) in Objective-C). Prefer the name in logs and cross-platform code.
+
+```swift
+} catch let error as AdfactenError {
+    print(error.name)   // "no_fill", "rejected", …
+}
+```
 
 | Code | Meaning |
 |---|---|
@@ -203,6 +216,23 @@ Errors use the domain `com.adfacten.ads` and `AdfactenErrorCode`:
 | `expired`, `notReady` | The ad expired or was already shown. Load a new one. |
 | `presentationFailed` | No view controller in a window, or another ad is on screen. |
 | `creativeFailed` | The image, HTML or video failed to load. |
+
+| Code | `name` |
+|---|---|
+| `notInitialized` | `not_initialized` |
+| `noFill` | `no_fill` |
+| `network` | `network_error`, or `server_error` for HTTP 5xx |
+| `serverRejected` | `rejected`, or `invalid_request` when `serverCode` is `invalid_request` |
+| `invalidResponse` | `invalid_response` (`internal_error` if the request could not be built) |
+| `expired` | `ad_expired` |
+| `notReady` | `not_ready`, or `already_shown` for a full-screen ad that was already presented |
+| `presentationFailed` | `show_failed` |
+| `creativeFailed` | `creative_failed` |
+| `childDirected` | `child_directed` |
+
+`video_not_supported` and `load_in_progress` belong to the shared list but are only used on Android.
+
+After a no-fill or a server error, a placement backs off: 30 seconds, doubling up to 15 minutes (plus some random spread). Loads during that time fail at once with `no_fill`. Being offline does not start a backoff.
 
 ## Test mode
 
@@ -252,6 +282,26 @@ python3 scripts/mock_server.py &       # local test server on :8197
 scripts/run_sample.sh                  # builds and runs in the simulator
 scripts/run_sample.sh http://127.0.0.1:8197 rewarded   # shows a rewarded ad automatically
 ```
+
+## Framework plugins
+
+The Flutter and React Native plugins report themselves with `Adfacten.setWrapper(name:version:)` (Objective-C `+[ADFAdfacten setWrapperName:version:]`) before `initialize`. Apps don't call it. Names are `flutter`, `react_native`, `unity`, or `other`; the version is up to 20 characters of `[0-9A-Za-z.+-]`. It is sent as `app.wrapper` with each ad request and appended to the User-Agent as ` Wrapper/<name>-<version>`. Native apps send neither.
+
+## Changelog
+
+### 1.0.2
+
+- Banner: the app's `refreshInterval` now wins over the placement's interval, so `0` really turns refresh off. Without an app setting, the placement's `refresh_s` is used (0 = off), else 60 s.
+- Banner: a failed load retries on the refresh timer only while the banner is on screen and the app is active, and waits for the placement's backoff. A creative that fails to render also retries. Rejections stop until the next `load()`.
+- Backoff: 30 s doubling up to 15 min (was 5 min). Network errors (offline) no longer start a backoff; HTTP 5xx still does.
+- Native: binding an ad to a new view detaches it from the previous one, and each ad records one impression and one viewable impression however often it is bound.
+- Errors: stable `AdfactenError.name` (and `userInfo["AdfactenErrorName"]`), shared with Android. Codes are unchanged.
+- `Adfacten.setWrapper(name:version:)` for framework plugins (`app.wrapper` request field, User-Agent suffix).
+- Reward amounts: `AdReward.amount` stays a `Double` and carries the server value exactly; the server sends whole numbers.
+
+### 1.0.0
+
+- First release: banner, interstitial, rewarded, native and app-open ads.
 
 ## Development
 
