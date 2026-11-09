@@ -245,7 +245,7 @@ Not supported yet. You don't need to add Adfacten entries to `SKAdNetworkItems` 
 
 `Project/AdfactenAds.xcodeproj` has the `AdfactenSample` scheme: a SwiftUI demo of every format, a UIKit screen with a banner in a table, and an Objective-C file that uses the API.
 
-Add an app in the Adfacten panel (**Apps › Add app**) and put its app key and placement ids in `Sample/AdfactenSample/SampleApp.swift`, or pass them as `ADF_APP_KEY`, `ADF_PLC_BANNER`, … environment variables. New apps stay in test mode until they are reviewed, so the sample only receives test ads. To work offline, run the bundled mock server:
+The sample is preconfigured with Adfacten's public sample app, which always receives test ads (never billed), so it runs as is. To try your own app, put its app key and placement ids from the panel (**Apps › your app**) in `Sample/AdfactenSample/SampleApp.swift`, or pass them as `ADF_APP_KEY`, `ADF_PLC_BANNER`, … environment variables. To work offline, run the bundled mock server:
 
 ```sh
 python3 scripts/mock_server.py &       # local test server on :8197

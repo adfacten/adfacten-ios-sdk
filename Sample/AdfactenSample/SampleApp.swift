@@ -2,18 +2,18 @@ import AdfactenAds
 import SwiftUI
 import UIKit
 
-/// Sample settings. Replace the placeholders with the app key and placement ids from your Adfacten
-/// panel (Apps › your app), or pass them as environment variables (simulator: `SIMCTL_CHILD_ADF_*`).
-/// A new app stays in test mode until it is reviewed, so it only receives test ads.
+/// Sample settings. The defaults are Adfacten's public sample app: it always receives test ads, which are
+/// never billed. To try your own app, use the app key and placement ids from the Adfacten panel
+/// (Apps › your app), or pass them as environment variables (simulator: `SIMCTL_CHILD_ADF_*`).
 enum DemoConfig {
     static let env = ProcessInfo.processInfo.environment
-    static var appKey: String { env["ADF_APP_KEY"] ?? "apk_YOUR_APP_KEY" }
+    static var appKey: String { env["ADF_APP_KEY"] ?? "apk_r2FjVF7YUGb3ITZZUt6ENHH1" }
     static var server: URL? { env["ADF_SERVER"].flatMap(URL.init(string:)) }
-    static var banner: String { env["ADF_PLC_BANNER"] ?? "plc_YOUR_BANNER" }
-    static var interstitial: String { env["ADF_PLC_INTERSTITIAL"] ?? "plc_YOUR_INTERSTITIAL" }
-    static var rewarded: String { env["ADF_PLC_REWARDED"] ?? "plc_YOUR_REWARDED" }
-    static var native: String { env["ADF_PLC_NATIVE"] ?? "plc_YOUR_NATIVE" }
-    static var appOpen: String { env["ADF_PLC_APP_OPEN"] ?? "plc_YOUR_APP_OPEN" }
+    static var banner: String { env["ADF_PLC_BANNER"] ?? "plc_034uZ7K268zGmUPhbl0LgL" }
+    static var interstitial: String { env["ADF_PLC_INTERSTITIAL"] ?? "plc_034uZ7K26J5FvjnFBJjThJ" }
+    static var rewarded: String { env["ADF_PLC_REWARDED"] ?? "plc_034uZ7K2CBEP9L6EQszuIk" }
+    static var native: String { env["ADF_PLC_NATIVE"] ?? "plc_034uZ7K2I1fWOEzDnkJpwt" }
+    static var appOpen: String { env["ADF_PLC_APP_OPEN"] ?? "plc_034uZ7K2IBiNmiy9FGrHNe" }
     /// "interstitial", "rewarded", "app_open" — loads and shows that format automatically.
     static var autoDemo: String? { env["ADF_AUTODEMO"] }
 }
