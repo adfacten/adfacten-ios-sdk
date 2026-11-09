@@ -18,6 +18,7 @@ final class ErrorNameTests: XCTestCase {
             .notReady: "not_ready", .presentationFailed: "show_failed", .creativeFailed: "creative_failed",
             .childDirected: "child_directed",
         ]
+        XCTAssertEqual(AdfactenError(.childDirected, "x", serverCode: "coppa").name, "rejected")
         for (code, name) in expected {
             XCTAssertEqual(AdfactenError(code, "x").name, name, "\(code)")
         }
@@ -35,7 +36,7 @@ final class ErrorNameTests: XCTestCase {
         XCTAssertEqual(name(503), "server_error")
         XCTAssertEqual(name(400), "invalid_request")
         XCTAssertEqual(name(403, #"{"code":"app_not_approved"}"#), "rejected")
-        XCTAssertEqual(name(403, #"{"code":"coppa"}"#), "child_directed")
+        XCTAssertEqual(name(403, #"{"code":"coppa"}"#), "rejected", "same as Android; serverCode stays coppa")
         XCTAssertEqual(name(200, "{"), "invalid_response")
     }
 
@@ -62,9 +63,13 @@ final class WrapperTests: XCTestCase {
         XCTAssertEqual(WrapperInfo(name: "cordova", version: "1").name, "other")
         XCTAssertEqual(WrapperInfo(name: "react-native", version: "1").name, "other")
         XCTAssertEqual(WrapperInfo(name: "flutter", version: "1.0.1+build-7").version, "1.0.1+build-7")
-        XCTAssertEqual(WrapperInfo(name: "flutter", version: "1.0 (beta); é/x").version, "1.0betax")
-        XCTAssertEqual(WrapperInfo(name: "flutter", version: String(repeating: "9", count: 40)).version.count, 20)
+        XCTAssertEqual(WrapperInfo(name: "flutter", version: " 1.0.1 ").version, "1.0.1", "trimmed")
+        XCTAssertEqual(WrapperInfo(name: "flutter", version: "1.0 (beta)").version, "unknown")
+        XCTAssertEqual(WrapperInfo(name: "flutter", version: "1.0é").version, "unknown")
+        XCTAssertEqual(WrapperInfo(name: "flutter", version: String(repeating: "9", count: 20)).version.count, 20)
+        XCTAssertEqual(WrapperInfo(name: "flutter", version: String(repeating: "9", count: 21)).version, "unknown")
         XCTAssertEqual(WrapperInfo(name: "flutter", version: "  ").version, "unknown")
+        XCTAssertEqual(WrapperInfo(name: "OTHER", version: "1").name, "other")
     }
 
     func testUserAgentSuffix() {

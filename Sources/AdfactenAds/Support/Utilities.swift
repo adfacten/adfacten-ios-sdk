@@ -65,8 +65,15 @@ struct Clock: Sendable {
 
 extension URLSession {
     /// Callback-based `dataTask` wrapper returning the HTTP response.
+    /// Requests without their own User-Agent get the session's one plus the current wrapper, so
+    /// `Adfacten.setWrapper` also applies after `initialize`.
     func adfData(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<(Data, HTTPURLResponse), Error>) in
+        var request = request
+        if request.value(forHTTPHeaderField: "User-Agent") == nil, let wrapper = Adfacten.wrapper,
+           let base = configuration.httpAdditionalHeaders?["User-Agent"] as? String {
+            request.setValue(base + wrapper.userAgentSuffix, forHTTPHeaderField: "User-Agent")
+        }
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<(Data, HTTPURLResponse), Error>) in
             let task = self.dataTask(with: request) { data, response, error in
                 if let error = error {
                     cont.resume(throwing: error)

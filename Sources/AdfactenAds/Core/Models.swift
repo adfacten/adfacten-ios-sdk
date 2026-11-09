@@ -83,15 +83,15 @@ struct WrapperInfo: Encodable, Sendable, Equatable {
     var name: String
     var version: String
 
-    /// Unknown names become `other`; the version keeps only `[0-9A-Za-z.+-]`, at most 20 chars.
+    /// Unknown names become `other`; a version that isn't `[0-9A-Za-z.+-]{1,20}` becomes `unknown`.
     init(name: String, version: String) {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self.name = Self.knownNames.contains(n) ? n : "other"
-        let allowed = version.unicodeScalars.filter {
+        let v = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        let valid = (1...20).contains(v.unicodeScalars.count) && v.unicodeScalars.allSatisfy {
             $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "+-.".unicodeScalars.contains($0))
         }
-        let v = String(String.UnicodeScalarView(allowed).prefix(20))
-        self.version = v.isEmpty ? "unknown" : v
+        self.version = valid ? v : "unknown"
     }
 
     /// ` Wrapper/<name>-<version>`, appended to the User-Agent.

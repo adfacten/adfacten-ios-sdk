@@ -101,7 +101,8 @@ final class AdClient: Sendable {
             let code = body?.code ?? (status == 400 ? "invalid_request" : "forbidden")
             let message = body?.message ?? "request rejected (\(status))"
             if code == "coppa" {
-                return .failure(AdfactenError(.childDirected, message, serverCode: code))
+                // Same name as Android: a server COPPA refusal is `rejected` (serverCode "coppa").
+                return .failure(AdfactenError(.childDirected, message, serverCode: code, name: .rejected))
             }
             return .failure(AdfactenError(.serverRejected, message, serverCode: code))
         default:

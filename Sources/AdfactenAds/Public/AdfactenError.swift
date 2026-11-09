@@ -41,7 +41,8 @@ public struct AdfactenError: Error, CustomNSError, LocalizedError, Sendable, Equ
     /// `server_error`, `invalid_response`, `rejected`, `ad_expired`, `already_shown`, `not_ready`,
     /// `show_failed`, `video_not_supported`, `load_in_progress`, `child_directed`, `creative_failed`.
     /// It is a bit finer than `code` (for example `network` splits into `network_error` and
-    /// `server_error`). Objective-C reads it from `userInfo[AdfactenErrorNameKey]`.
+    /// `server_error`), and a server COPPA refusal is `rejected` with `serverCode` "coppa".
+    /// Objective-C reads it from `userInfo[AdfactenErrorNameKey]`.
     public let name: String
 
     public init(_ code: AdfactenErrorCode, _ message: String, serverCode: String? = nil) {
@@ -95,7 +96,7 @@ enum AdfactenErrorName: String, CaseIterable, Sendable {
         case .notReady: return .notReady
         case .presentationFailed: return .showFailed
         case .creativeFailed: return .creativeFailed
-        case .childDirected: return .childDirected
+        case .childDirected: return serverCode == "coppa" ? .rejected : .childDirected
         }
     }
 }

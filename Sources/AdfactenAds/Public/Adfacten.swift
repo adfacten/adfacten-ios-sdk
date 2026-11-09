@@ -52,8 +52,9 @@ public final class Adfacten: NSObject {
 
     /// For framework plugins (Flutter, React Native, Unity) only; apps don't need it.
     /// Reports the plugin with each ad request (`app.wrapper`) and in the User-Agent. Call it
-    /// before `initialize`. Names other than `flutter`, `react_native` and `unity` are sent as
-    /// `other`; the version keeps `[0-9A-Za-z.+-]`, up to 20 characters.
+    /// before `initialize` (later calls apply to later requests). Names other than `flutter`,
+    /// `react_native` and `unity` are sent as `other`; a version that isn't 1–20 characters of
+    /// `[0-9A-Za-z.+-]` is sent as `unknown`.
     @objc(setWrapperName:version:)
     public static func setWrapper(name: String, version: String) {
         wrapperBox.set(WrapperInfo(name: name, version: version))
@@ -164,8 +165,8 @@ final class SDKContext: @unchecked Sendable {
         let sessionConfig = env.sessionConfiguration()
         // Beacons and VAST trackers carry the SDK user agent too, so the server never sees a bare
         // CFNetwork UA (which bot filters may drop).
-        let ua = UserAgent.make(sdkVersion: Adfacten.sdkVersion, device: DeviceSnapshot.capture(connection: "unknown"),
-                                wrapper: Adfacten.wrapper)
+        // The wrapper suffix is added per request (see `adfData`), not here.
+        let ua = UserAgent.make(sdkVersion: Adfacten.sdkVersion, device: DeviceSnapshot.capture(connection: "unknown"))
         var headers = sessionConfig.httpAdditionalHeaders ?? [:]
         headers["User-Agent"] = ua
         headers["X-Adfacten-SDK"] = "ios/\(Adfacten.sdkVersion)"

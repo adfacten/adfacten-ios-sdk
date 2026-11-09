@@ -72,7 +72,7 @@ The banner refreshes every 30–120 seconds of on-screen time. Time only counts 
 - If you set `refreshInterval`, it wins: `0` turns refresh off, even when the placement has an interval in the panel.
 - If you don't set it, the placement's interval from the panel is used (off if the placement says 0), otherwise 60 seconds.
 - After a failed load (no fill, network or server error) the banner tries again by itself after one refresh interval of on-screen time (60 seconds when refresh is off), and never before the placement's backoff ends. It doesn't retry while it is off screen or the app is in the background.
-- A rejected request (`rejected`, `invalid_request`, `child_directed`: app or placement not approved, wrong bundle, COPPA) stops the banner until you call `load()` again.
+- A rejected request (`rejected`, `invalid_request`: app or placement not approved, wrong bundle, COPPA) stops the banner until you call `load()` again.
 
 ```swift
 let banner = AdfactenBannerView(placementId: "plc_XXXXXXXX", size: .banner)
@@ -228,9 +228,9 @@ Errors use the domain `com.adfacten.ads` and `AdfactenErrorCode`. Each error als
 | `notReady` | `not_ready`, or `already_shown` for a full-screen ad that was already presented |
 | `presentationFailed` | `show_failed` |
 | `creativeFailed` | `creative_failed` |
-| `childDirected` | `child_directed` |
+| `childDirected` | `rejected` with `serverCode` `coppa` (same as Android) |
 
-`video_not_supported` and `load_in_progress` belong to the shared list but are only used on Android.
+`video_not_supported`, `load_in_progress` and `child_directed` belong to the shared list but are not used by the iOS SDK.
 
 After a no-fill or a server error, a placement backs off: 30 seconds, doubling up to 15 minutes (plus some random spread). Loads during that time fail at once with `no_fill`. Being offline does not start a backoff.
 
@@ -285,7 +285,7 @@ scripts/run_sample.sh http://127.0.0.1:8197 rewarded   # shows a rewarded ad aut
 
 ## Framework plugins
 
-The Flutter and React Native plugins report themselves with `Adfacten.setWrapper(name:version:)` (Objective-C `+[ADFAdfacten setWrapperName:version:]`) before `initialize`. Apps don't call it. Names are `flutter`, `react_native`, `unity`, or `other`; the version is up to 20 characters of `[0-9A-Za-z.+-]`. It is sent as `app.wrapper` with each ad request and appended to the User-Agent as ` Wrapper/<name>-<version>`. Native apps send neither.
+The Flutter and React Native plugins report themselves with `Adfacten.setWrapper(name:version:)` (Objective-C `+[ADFAdfacten setWrapperName:version:]`) before `initialize`. Apps don't call it. Names are `flutter`, `react_native`, `unity`, or `other`; the version is 1–20 characters of `[0-9A-Za-z.+-]` (surrounding spaces are trimmed). A version that doesn't fit is sent as `unknown`. It is sent as `app.wrapper` with each ad request and appended to the User-Agent of every request as ` Wrapper/<name>-<version>` (a call after `initialize` applies to later requests). Native apps send neither.
 
 ## Changelog
 
@@ -295,7 +295,7 @@ The Flutter and React Native plugins report themselves with `Adfacten.setWrapper
 - Banner: a failed load retries on the refresh timer only while the banner is on screen and the app is active, and waits for the placement's backoff. A creative that fails to render also retries. Rejections stop until the next `load()`.
 - Backoff: 30 s doubling up to 15 min (was 5 min). Network errors (offline) no longer start a backoff; HTTP 5xx still does.
 - Native: binding an ad to a new view detaches it from the previous one, and each ad records one impression and one viewable impression however often it is bound.
-- Errors: stable `AdfactenError.name` (and `userInfo["AdfactenErrorName"]`), shared with Android. Codes are unchanged.
+- Errors: stable `AdfactenError.name` (and `userInfo["AdfactenErrorName"]`), shared with Android. Codes are unchanged. A server COPPA refusal keeps code `childDirected` but is named `rejected` (`serverCode` `coppa`).
 - `Adfacten.setWrapper(name:version:)` for framework plugins (`app.wrapper` request field, User-Agent suffix).
 - Reward amounts: `AdReward.amount` stays a `Double` and carries the server value exactly; the server sends whole numbers.
 

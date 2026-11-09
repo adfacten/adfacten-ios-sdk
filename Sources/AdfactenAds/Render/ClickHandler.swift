@@ -84,8 +84,11 @@ final class ClickHandler: NSObject {
         cfg.timeoutIntervalForRequest = 3
         cfg.timeoutIntervalForResource = 4
         cfg.httpShouldSetCookies = false
-        if let ua = Adfacten.context?.session.configuration.httpAdditionalHeaders {
-            cfg.httpAdditionalHeaders = ua
+        if var headers = Adfacten.context?.session.configuration.httpAdditionalHeaders {
+            if let ua = headers["User-Agent"] as? String, let wrapper = Adfacten.wrapper {
+                headers["User-Agent"] = ua + wrapper.userAgentSuffix
+            }
+            cfg.httpAdditionalHeaders = headers
         }
         let s = URLSession(configuration: cfg, delegate: NoRedirect(), delegateQueue: nil)
         resolver = s

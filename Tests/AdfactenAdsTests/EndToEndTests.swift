@@ -265,13 +265,18 @@ final class EndToEndTests: XCTestCase {
     }
 
     func testWrapperIsReportedOnTheWire() async throws {
-        Adfacten.setWrapper(name: "flutter", version: "1.0.1")
+        // Called after initialize (setUp): later requests still carry it.
+        Adfacten.setWrapper(name: " Flutter ", version: "1.0.1")
         defer { Adfacten.wrapperBox.set(nil) }
-        Adfacten.initialize(appKey: "apk_test", config: AdfactenConfig(testMode: true))
         MockURLProtocol.route("/m/v1/ad", .init(status: 200, body: Fixtures.adJSON(format: "interstitial")))
         _ = try await InterstitialAd.load(placementId: "plc_w")
         let req = try XCTUnwrap(MockURLProtocol.requests(path: "/m/v1/ad").last)
         XCTAssertTrue(req.headers["User-Agent"]?.hasSuffix(" Wrapper/flutter-1.0.1") == true, req.headers["User-Agent"] ?? "")
+        // Requests on the shared session (images, beacons) get the suffix once.
+        let image = try XCTUnwrap(MockURLProtocol.recorded.first { $0.url.host == "cdn.test" })
+        let imageUA = image.headers["User-Agent"] ?? ""
+        XCTAssertTrue(imageUA.hasSuffix(" Wrapper/flutter-1.0.1"), imageUA)
+        XCTAssertEqual(imageUA.components(separatedBy: "Wrapper/").count, 2)
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: req.body ?? Data()) as? [String: Any])
         let app = try XCTUnwrap(body["app"] as? [String: Any])
         XCTAssertEqual(app["wrapper"] as? [String: String], ["name": "flutter", "version": "1.0.1"])
@@ -352,6 +357,23 @@ final class EndToEndTests: XCTestCase {
         XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 2)
         // Second no-fill: the placement backs off 60 s, so the banner waits that long, not 30 s.
         XCTAssertEqual(banner.retryAfterFailure ?? 0, 60, accuracy: 0.5)
+        banner.destroy()
+        banner.removeFromSuperview()
+    }
+
+    func testEmptyBannerRetriesEvenWithRefreshOff() async {
+        MockURLProtocol.route("/m/v1/ad", .init(status: 204))
+        let banner = onScreenBanner("plc_off_retry")
+        banner.refreshInterval = 0
+        var failures = 0
+        banner.onFailed = { _ in failures += 1 }
+        banner.load()
+        await waitUntil(5, "failure") { failures == 1 }
+        XCTAssertEqual(banner.retryAfterFailure, 60, "off only stops rotation; an empty slot retries every 60 s")
+        clock.advance(31)
+        for _ in 0..<60 { banner.refreshTick() }
+        await waitUntil(5, "retry") { failures == 2 }
+        XCTAssertEqual(MockURLProtocol.requests(path: "/m/v1/ad").count, 2)
         banner.destroy()
         banner.removeFromSuperview()
     }
